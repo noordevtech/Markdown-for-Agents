@@ -53,6 +53,7 @@ final class DiscoveryTest extends TestCase {
 			array( '/.well-known/oauth-protected-resource', 'protected_resource_metadata' ),
 			array( '/.well-known/oauth-authorization-server', 'authorization_server_metadata' ),
 			array( '/.well-known/mcp/server-card.json', 'server_card' ),
+			array( '/.well-known/mcp.json', 'server_card' ),
 			array( '/.well-known/agent-skills/index.json', 'skills_index' ),
 			array( '/.well-known/agent-skills/markdown-for-agents/SKILL.md', 'skill_md' ),
 			array( '/auth.md', 'auth_md' ),

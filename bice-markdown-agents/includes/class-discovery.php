@@ -38,6 +38,9 @@ final class Discovery {
 		'/.well-known/oauth-protected-resource'                 => 'protected_resource_metadata',
 		'/.well-known/oauth-authorization-server'               => 'authorization_server_metadata',
 		'/.well-known/mcp/server-card.json'                     => 'server_card',
+		// Alias probed by agent-readiness scanners (isitagentready.com hits
+		// both paths); serves the same server card.
+		'/.well-known/mcp.json'                                 => 'server_card',
 		'/.well-known/agent-skills/index.json'                  => 'skills_index',
 		'/.well-known/agent-skills/markdown-for-agents/SKILL.md' => 'skill_md',
 		'/auth.md'                                              => 'auth_md',
@@ -53,15 +56,12 @@ final class Discovery {
 			return;
 		}
 
-		// init (not plugins_loaded): WPML and friends are loaded, and we can
-		// still answer before WP routing would 404 these virtual paths.
-		add_action(
-			'init',
-			static function () use ( $settings ): void {
-				self::maybe_serve( $settings );
-			},
-			1
-		);
+		// Serve immediately (we are called at plugins_loaded): these documents
+		// need no WP query, and answering this early beats security plugins
+		// that 403 dot-paths on init or template_redirect. Note this still
+		// cannot help when the 403 happens before WordPress runs at all
+		// (nginx dotfile deny, Cloudflare WAF) — see the README.
+		self::maybe_serve( $settings );
 	}
 
 	/**

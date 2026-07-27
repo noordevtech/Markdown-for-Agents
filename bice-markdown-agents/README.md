@@ -214,6 +214,7 @@ GET/HEAD requests:
 | `/.well-known/oauth-authorization-server` | RFC 8414 + auth.md `agent_auth` | Restated PRM fields plus `issuer`, `response_types_supported`, and an `agent_auth` block (`skill`, `register_uri`, identity/credential types) per the [workos/auth.md](https://github.com/workos/auth.md) reference shape |
 | `/auth.md` | [workos.com/auth-md](https://workos.com/auth-md) | Agent registration/authentication instructions with the canonical `# auth.md` H1 and the spec's discover → access → register step structure; customizable via the `bice_mda_auth_md` filter |
 | `/.well-known/mcp/server-card.json` | MCP [SEP-1649](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2127) (draft) | `serverInfo` (name, version), `capabilities`, `transport` (only when a real MCP endpoint is configured) |
+| `/.well-known/mcp.json` | — | Alias for the server card; agent-readiness scanners probe both paths |
 | `/.well-known/agent-skills/index.json` | [Agent Skills Discovery RFC v0.2.0](https://github.com/cloudflare/agent-skills-discovery-rfc) | `$schema`, `skills[]` with `name`, `type`, `description`, `url`, `sha256` |
 | `/.well-known/agent-skills/markdown-for-agents/SKILL.md` | — | A genuine skill teaching agents to read this site as Markdown; its `sha256` in the index always matches the served bytes |
 
@@ -238,12 +239,40 @@ Skills index/`$schema` URL are early-stage drafts — field names are
 best-effort against the drafts as of 2026 and may need updating as they
 stabilize (flagged in `includes/class-discovery.php`).
 
-**403 on `/.well-known/`?** Hardened nginx configs deny dotfile paths
-(`location ~ /\. { deny all; }`), which is exactly what an agent-readiness
-scan reports as 403s on the server card and skills index. Include
-[`nginx/well-known.conf`](nginx/well-known.conf) in the `server` block to
-route `/.well-known/` to WordPress (real files like ACME challenges still
-win via `try_files`).
+### Troubleshooting: 403 on `/.well-known/*` while `/auth.md` works
+
+This exact symptom — `/auth.md` answers 200 `text/markdown` (the plugin is
+alive) but every `/.well-known/…` path returns 403 `text/html` — means a
+layer **in front of the plugin** rejects paths starting with a dot. The
+plugin serves its discovery routes as early as `plugins_loaded`, so if the
+request reaches WordPress at all, it answers. A 403 therefore comes from
+one of these layers; check them in order:
+
+1. **nginx dotfile deny** (most common): a hardened config contains
+   `location ~ /\. { deny all; }` (sometimes `location ~ /\.(?!well-known)`
+   missing). Fix: include [`nginx/well-known.conf`](nginx/well-known.conf)
+   in the `server { }` block — it routes `/.well-known/` to WordPress while
+   real files (ACME challenges) still win via `try_files`. On this stack
+   the nginx config lives in the Railway container image, so redeploy after
+   editing. Diagnose: request the path directly against the origin
+   (bypassing Cloudflare); a bare nginx-styled `403 Forbidden` HTML page
+   confirms it.
+2. **Cloudflare WAF / managed rules**: check Security → Events in the
+   Cloudflare dashboard for blocked requests to `/.well-known/…`. Fix: add
+   a WAF exception (skip rule) for `URI Path starts with "/.well-known/"`.
+3. **A WordPress security plugin** that blocks "hidden file" URL patterns
+   (Wordfence, iThemes/Solid Security "protect hidden files", custom
+   snippets). The plugin now answers at `plugins_loaded`, earlier than most
+   of these act — but a blocker running from an mu-plugin or the drop-in
+   could still win. Diagnose: if the 403 response carries WordPress-ish
+   headers (`Link` tags to wp-json, privacy policy…), the request did reach
+   PHP and some WP-layer code denied it; check the security plugin's
+   "hidden files"/dot-path setting and whitelist `/.well-known/`.
+
+The auth.md scan check depends on this too: validators fetch
+`/.well-known/oauth-protected-resource` as part of validating auth.md, so
+a blocked `/.well-known/` fails the auth.md check even when `/auth.md`
+itself is served correctly. One root cause, several red checks.
 
 ## WebMCP browser tools
 
