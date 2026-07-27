@@ -203,7 +203,11 @@ final class Discovery {
 			'resource'                 => $site,
 			// Empty is deliberate and correct when no authorization server
 			// issues tokens for this resource — see the class docblock.
-			'authorization_servers'    => array_values( (array) $config['authorization_servers'] ),
+			// Defence in depth: even a corrupted stored option must never
+			// publish an implausible issuer (e.g. the "http://Array" artifact).
+			'authorization_servers'    => array_values(
+				array_filter( (array) $config['authorization_servers'], array( Settings::class, 'is_valid_issuer' ) )
+			),
 			'scopes_supported'         => array_values( (array) $config['scopes'] ),
 			'bearer_methods_supported' => array( 'header' ),
 			'resource_name'            => (string) $config['site_name'],
@@ -318,7 +322,9 @@ MD . "\n";
 		$site     = rtrim( (string) $config['site_url'], '/' );
 		$name     = (string) $config['site_name'];
 		$email    = (string) $config['contact_email'];
-		$servers  = array_values( (array) $config['authorization_servers'] );
+		$servers  = array_values(
+			array_filter( (array) $config['authorization_servers'], array( Settings::class, 'is_valid_issuer' ) )
+		);
 		$register = (string) $config['register_uri'];
 
 		$auth_section = array() !== $servers
@@ -332,8 +338,10 @@ MD . "\n";
 			: 'No self-service agent registration is currently open. For elevated or programmatic access (APIs, reservations, partnerships), contact the site operator'
 				. ( '' !== $email ? " at {$email}." : '.' );
 
+		$interpretation = self::signal_interpretation( (string) $config['content_signal'] );
 		$signal_section = '' !== (string) $config['content_signal']
-			? "\n## Content-usage policy\n\nRespect the `Content-Signal` directive in {$site}/robots.txt\n(https://contentsignals.org/): `" . (string) $config['content_signal'] . "` — AI\nanswer-time use is welcome; training use is not permitted.\n"
+			? "\n## Content-usage policy\n\nRespect the `Content-Signal` directive in {$site}/robots.txt\n(https://contentsignals.org/): `" . (string) $config['content_signal'] . '`'
+				. ( '' !== $interpretation ? " — {$interpretation}" : '' ) . "\n"
 			: '';
 
 		$markdown = <<<MD
@@ -369,6 +377,41 @@ MD . "\n";
 		}
 
 		return $markdown;
+	}
+
+	/**
+	 * Human-readable interpretation of a Content-Signal directive, derived
+	 * from the actual configured values so the prose can never contradict
+	 * the directive (e.g. claiming training is not permitted while the
+	 * directive says ai-train=yes).
+	 *
+	 * @param string $signal_line e.g. "Content-Signal: search=yes, ai-train=no".
+	 * @return string Sentence fragment, '' when nothing to interpret.
+	 */
+	public static function signal_interpretation( string $signal_line ): string {
+		$phrases = array(
+			'search'   => array(
+				'yes' => 'search indexing is welcome',
+				'no'  => 'search indexing is not permitted',
+			),
+			'ai-input' => array(
+				'yes' => 'AI answer-time use is welcome',
+				'no'  => 'AI answer-time use is not permitted',
+			),
+			'ai-train' => array(
+				'yes' => 'training use is permitted',
+				'no'  => 'training use is not permitted',
+			),
+		);
+
+		$parts = array();
+		if ( preg_match_all( '/(search|ai-input|ai-train)\s*=\s*(yes|no)/i', $signal_line, $matches, PREG_SET_ORDER ) ) {
+			foreach ( $matches as $match ) {
+				$parts[] = $phrases[ strtolower( $match[1] ) ][ strtolower( $match[2] ) ];
+			}
+		}
+
+		return implode( '; ', $parts );
 	}
 
 	// ------------------------------------------------------------------

@@ -239,6 +239,38 @@ final class DiscoveryTest extends TestCase {
 		$this->assertStringContainsString( 'training use is not permitted', $md );
 	}
 
+	public function test_auth_md_interpretation_follows_the_actual_policy(): void {
+		// The prose is derived from the directive, so it can never contradict
+		// robots.txt — with ai-train=yes it must NOT claim training is banned.
+		$md = Discovery::auth_md(
+			self::config( array( 'content_signal' => 'Content-Signal: search=yes, ai-input=yes, ai-train=yes' ) )
+		);
+
+		$this->assertStringContainsString( 'training use is permitted', $md );
+		$this->assertStringNotContainsString( 'training use is not permitted', $md );
+	}
+
+	public function test_signal_interpretation_parses_each_signal(): void {
+		$this->assertSame(
+			'search indexing is welcome; AI answer-time use is welcome; training use is not permitted',
+			Discovery::signal_interpretation( 'Content-Signal: search=yes, ai-input=yes, ai-train=no' )
+		);
+		$this->assertSame( '', Discovery::signal_interpretation( '' ) );
+	}
+
+	public function test_corrupted_issuer_artifact_never_reaches_published_documents(): void {
+		// Even if a corrupted option value slips past Settings::heal(), the
+		// builders themselves must refuse to publish an implausible issuer.
+		$config = self::config( array( 'authorization_servers' => array( 'http://Array' ) ) );
+
+		$prm = Discovery::protected_resource_metadata( $config );
+		$this->assertSame( array(), $prm['authorization_servers'] );
+
+		$md = Discovery::auth_md( $config );
+		$this->assertStringNotContainsString( 'http://Array', $md );
+		$this->assertStringContainsString( 'no authentication', $md );
+	}
+
 	public function test_auth_md_omits_signal_section_when_no_signal(): void {
 		$md = Discovery::auth_md( self::config( array( 'content_signal' => '' ) ) );
 

@@ -38,4 +38,4 @@ Quick facts:
 - WebMCP: `navigator.modelContext.provideContext()` tools
   (`search_content`, `get_page_markdown`) for browser-embedded agents.
 - Works as a normal plugin or from `mu-plugins/` via the bundled loader.
-- 170 PHPUnit tests; `league/html-to-markdown` bundled in `vendor/`.
+- 180 PHPUnit tests; `league/html-to-markdown` bundled in `vendor/`.

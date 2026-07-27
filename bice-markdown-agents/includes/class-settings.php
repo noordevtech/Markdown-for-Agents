@@ -48,14 +48,98 @@ final class Settings {
 	}
 
 	/**
-	 * Current settings merged over defaults.
+	 * Current settings merged over defaults, healed of corruption artifacts.
 	 *
 	 * @return array<string, mixed>
 	 */
 	public static function get(): array {
 		$stored = get_option( self::OPTION, array() );
 
-		return array_merge( self::defaults(), is_array( $stored ) ? $stored : array() );
+		return self::heal( array_merge( self::defaults(), is_array( $stored ) ? $stored : array() ) );
+	}
+
+	/**
+	 * Repair stored settings in place (pure — no WordPress calls).
+	 *
+	 * WordPress runs a register_setting sanitize callback twice when the
+	 * option is first created; a pre-1.3.1 version of sanitize() was not
+	 * idempotent and string-cast already-parsed arrays, storing PHP's
+	 * "Array" artifact ("http://Array" issuers, "Array" scopes, "/Array"
+	 * paths). This strips those artifacts and coerces types, so corrupted
+	 * values can never reach the published discovery documents; re-saving
+	 * the settings page persists the healed values.
+	 *
+	 * @param array<string, mixed> $settings Merged settings.
+	 * @return array<string, mixed>
+	 */
+	public static function heal( array $settings ): array {
+		$settings['oauth_authorization_servers'] = array_values(
+			array_filter(
+				self::parse_list( $settings['oauth_authorization_servers'] ?? array(), '/\R+/' ),
+				array( self::class, 'is_valid_issuer' )
+			)
+		);
+
+		$settings['oauth_scopes'] = array_values(
+			array_filter(
+				self::parse_list( $settings['oauth_scopes'] ?? array(), '/[\s,]+/' ),
+				static fn( string $scope ): bool => 'Array' !== $scope
+					&& 1 === preg_match( '/\A[\x21\x23-\x5B\x5D-\x7E]+\z/', $scope )
+			)
+		);
+
+		$settings['excluded_paths'] = array_values(
+			array_filter(
+				self::parse_list( $settings['excluded_paths'] ?? array(), '/\R+/' ),
+				static fn( string $path ): bool => '/Array' !== $path && 'Array' !== $path
+			)
+		);
+
+		return $settings;
+	}
+
+	/**
+	 * Coerce a stored/submitted list value (string blob or array) into a
+	 * clean array of trimmed non-empty strings.
+	 *
+	 * @param mixed  $raw       String or array.
+	 * @param string $delimiter Split regex for the string form.
+	 * @return string[]
+	 */
+	public static function parse_list( $raw, string $delimiter ): array {
+		$items = is_array( $raw ) ? $raw : ( preg_split( $delimiter, (string) $raw ) ?: array() );
+
+		$clean = array();
+		foreach ( $items as $item ) {
+			if ( ! is_scalar( $item ) ) {
+				continue;
+			}
+			$item = trim( (string) $item );
+			if ( '' !== $item ) {
+				$clean[] = $item;
+			}
+		}
+
+		return $clean;
+	}
+
+	/**
+	 * Whether a value is a plausible OAuth/OIDC issuer URL: https?://, with
+	 * a dotted hostname (or localhost). Rejects artifacts like
+	 * "http://Array" that must never be advertised as an authorization
+	 * server. Pure — usable from the document builders and tests.
+	 *
+	 * @param string $url Candidate issuer URL.
+	 * @return bool
+	 */
+	public static function is_valid_issuer( string $url ): bool {
+		if ( ! preg_match( '#\Ahttps?://#i', $url ) ) {
+			return false;
+		}
+
+		$host = (string) parse_url( $url, PHP_URL_HOST );
+
+		return 'localhost' === strtolower( $host ) || str_contains( $host, '.' );
 	}
 
 	/**
@@ -252,18 +336,17 @@ final class Settings {
 		$clean['webmcp_enabled']    = ! empty( $input['webmcp_enabled'] );
 
 		$servers = array();
-		foreach ( preg_split( '/\R+/', (string) ( $input['oauth_authorization_servers'] ?? '' ) ) ?: array() as $line ) {
+		foreach ( self::parse_list( $input['oauth_authorization_servers'] ?? '', '/\R+/' ) as $line ) {
 			$line = esc_url_raw( trim( $line ) );
-			if ( '' !== $line ) {
+			if ( '' !== $line && self::is_valid_issuer( $line ) ) {
 				$servers[] = $line;
 			}
 		}
 		$clean['oauth_authorization_servers'] = $servers;
 
 		$scopes = array();
-		foreach ( preg_split( '/[\s,]+/', (string) ( $input['oauth_scopes'] ?? '' ) ) ?: array() as $scope ) {
-			$scope = trim( $scope );
-			if ( '' !== $scope && preg_match( '/\A[\x21\x23-\x5B\x5D-\x7E]+\z/', $scope ) ) {
+		foreach ( self::parse_list( $input['oauth_scopes'] ?? '', '/[\s,]+/' ) as $scope ) {
+			if ( 'Array' !== $scope && preg_match( '/\A[\x21\x23-\x5B\x5D-\x7E]+\z/', $scope ) ) {
 				$scopes[] = $scope;
 			}
 		}
@@ -282,14 +365,17 @@ final class Settings {
 			)
 		);
 
-		$raw_paths = (string) ( $input['excluded_paths'] ?? '' );
-		$paths     = array();
-		foreach ( preg_split( '/\R+/', $raw_paths ) ?: array() as $line ) {
+		// NOTE: every list field below accepts both the textarea string (first
+		// sanitize pass) and an already-parsed array (WordPress runs the
+		// sanitize callback twice when the option is first created). A
+		// non-idempotent version of this method string-cast arrays on the
+		// second pass and stored "Array" artifacts.
+		$paths = array();
+		foreach ( self::parse_list( $input['excluded_paths'] ?? '', '/\R+/' ) as $line ) {
 			$line = trim( sanitize_text_field( $line ) );
-			if ( '' === $line ) {
-				continue;
+			if ( '' !== $line ) {
+				$paths[] = '/' . ltrim( $line, '/' );
 			}
-			$paths[] = '/' . ltrim( $line, '/' );
 		}
 		$clean['excluded_paths'] = $paths;
 

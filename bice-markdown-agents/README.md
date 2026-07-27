@@ -393,7 +393,7 @@ curl -s -X POST https://isitagentready.com/api/scan \
 
 ```bash
 composer install          # dev deps (PHPUnit)
-vendor/bin/phpunit        # 170 tests: parser, guards, converter, signals, discovery
+vendor/bin/phpunit        # 180 tests: parser, guards, converter, signals, discovery
 composer install --no-dev # before committing vendor/ for deployment
 ```
 

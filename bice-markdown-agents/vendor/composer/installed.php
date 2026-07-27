@@ -3,7 +3,7 @@
         'name' => 'bice/markdown-agents',
         'pretty_version' => 'dev-claude/session-p40ybc',
         'version' => 'dev-claude/session-p40ybc',
-        'reference' => 'c21e721a7a3a2cc5b111fd25b8696e6300c372f8',
+        'reference' => '0100a7880738671bb2482c4814d01eb59f60cfad',
         'type' => 'wordpress-plugin',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -13,7 +13,7 @@
         'bice/markdown-agents' => array(
             'pretty_version' => 'dev-claude/session-p40ybc',
             'version' => 'dev-claude/session-p40ybc',
-            'reference' => 'c21e721a7a3a2cc5b111fd25b8696e6300c372f8',
+            'reference' => '0100a7880738671bb2482c4814d01eb59f60cfad',
             'type' => 'wordpress-plugin',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
