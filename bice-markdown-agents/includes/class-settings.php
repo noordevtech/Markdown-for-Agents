@@ -1,0 +1,277 @@
+<?php
+/**
+ * Settings page: Settings → Markdown for Agents.
+ *
+ * @package Bice\MarkdownAgents
+ */
+
+namespace Bice\MarkdownAgents;
+
+/**
+ * Stores everything in a single option array. Defaults are conservative:
+ * negotiation on, `.md` suffix off, nothing excluded.
+ */
+final class Settings {
+
+	public const OPTION = 'bice_mda_settings';
+
+	private const PAGE = 'bice-markdown-agents';
+
+	/**
+	 * Default settings.
+	 *
+	 * @return array<string, mixed>
+	 */
+	public static function defaults(): array {
+		return array(
+			'enabled'             => true,
+			'md_suffix'           => false,
+			'excluded_post_types' => array(),
+			'excluded_paths'      => array(),
+		);
+	}
+
+	/**
+	 * Current settings merged over defaults.
+	 *
+	 * @return array<string, mixed>
+	 */
+	public static function get(): array {
+		$stored = get_option( self::OPTION, array() );
+
+		return array_merge( self::defaults(), is_array( $stored ) ? $stored : array() );
+	}
+
+	/**
+	 * Register admin hooks.
+	 */
+	public static function init(): void {
+		add_action( 'admin_menu', array( self::class, 'register_menu' ) );
+		add_action( 'admin_init', array( self::class, 'register_settings' ) );
+	}
+
+	/**
+	 * Add the options page under Settings.
+	 */
+	public static function register_menu(): void {
+		add_options_page(
+			__( 'Markdown for Agents', 'bice-markdown-agents' ),
+			__( 'Markdown for Agents', 'bice-markdown-agents' ),
+			'manage_options',
+			self::PAGE,
+			array( self::class, 'render_page' )
+		);
+	}
+
+	/**
+	 * Settings API registration.
+	 */
+	public static function register_settings(): void {
+		register_setting(
+			self::PAGE,
+			self::OPTION,
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( self::class, 'sanitize' ),
+				'default'           => self::defaults(),
+			)
+		);
+
+		add_settings_section(
+			'bice_mda_main',
+			__( 'Content negotiation', 'bice-markdown-agents' ),
+			'__return_false',
+			self::PAGE
+		);
+
+		add_settings_field(
+			'enabled',
+			__( 'Serve Markdown to agents', 'bice-markdown-agents' ),
+			array( self::class, 'render_enabled_field' ),
+			self::PAGE,
+			'bice_mda_main'
+		);
+
+		add_settings_field(
+			'md_suffix',
+			__( '.md URL suffix', 'bice-markdown-agents' ),
+			array( self::class, 'render_suffix_field' ),
+			self::PAGE,
+			'bice_mda_main'
+		);
+
+		add_settings_field(
+			'excluded_post_types',
+			__( 'Excluded post types', 'bice-markdown-agents' ),
+			array( self::class, 'render_post_types_field' ),
+			self::PAGE,
+			'bice_mda_main'
+		);
+
+		add_settings_field(
+			'excluded_paths',
+			__( 'Excluded paths', 'bice-markdown-agents' ),
+			array( self::class, 'render_paths_field' ),
+			self::PAGE,
+			'bice_mda_main'
+		);
+	}
+
+	/**
+	 * Sanitize the submitted option array.
+	 *
+	 * @param mixed $input Raw input.
+	 * @return array<string, mixed>
+	 */
+	public static function sanitize( $input ): array {
+		$input = is_array( $input ) ? $input : array();
+		$clean = self::defaults();
+
+		$clean['enabled']   = ! empty( $input['enabled'] );
+		$clean['md_suffix'] = ! empty( $input['md_suffix'] );
+
+		$public_types                 = get_post_types( array( 'public' => true ) );
+		$clean['excluded_post_types'] = array_values(
+			array_intersect(
+				array_map( 'sanitize_key', (array) ( $input['excluded_post_types'] ?? array() ) ),
+				array_keys( $public_types )
+			)
+		);
+
+		$raw_paths = (string) ( $input['excluded_paths'] ?? '' );
+		$paths     = array();
+		foreach ( preg_split( '/\R+/', $raw_paths ) ?: array() as $line ) {
+			$line = trim( sanitize_text_field( $line ) );
+			if ( '' === $line ) {
+				continue;
+			}
+			$paths[] = '/' . ltrim( $line, '/' );
+		}
+		$clean['excluded_paths'] = $paths;
+
+		return $clean;
+	}
+
+	/**
+	 * Render: master switch.
+	 */
+	public static function render_enabled_field(): void {
+		$settings = self::get();
+		printf(
+			'<label><input type="checkbox" name="%1$s[enabled]" value="1" %2$s> %3$s</label>',
+			esc_attr( self::OPTION ),
+			checked( $settings['enabled'], true, false ),
+			esc_html__( 'Answer requests preferring text/markdown with a Markdown rendering of the page.', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render: .md suffix switch.
+	 */
+	public static function render_suffix_field(): void {
+		$settings = self::get();
+		printf(
+			'<label><input type="checkbox" name="%1$s[md_suffix]" value="1" %2$s> %3$s</label><p class="description">%4$s</p>',
+			esc_attr( self::OPTION ),
+			checked( $settings['md_suffix'], true, false ),
+			esc_html__( 'Also serve Markdown at an index.md suffix URL (e.g. /traiteur/index.md).', 'bice-markdown-agents' ),
+			esc_html__( 'Uses a distinct URL, so it is safe for edge caches.', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render: post-type exclusion checkboxes.
+	 */
+	public static function render_post_types_field(): void {
+		$settings = self::get();
+		$excluded = (array) $settings['excluded_post_types'];
+
+		foreach ( get_post_types( array( 'public' => true ), 'objects' ) as $type ) {
+			printf(
+				'<label style="display:block"><input type="checkbox" name="%1$s[excluded_post_types][]" value="%2$s" %3$s> %4$s <code>%2$s</code></label>',
+				esc_attr( self::OPTION ),
+				esc_attr( $type->name ),
+				checked( in_array( $type->name, $excluded, true ), true, false ),
+				esc_html( $type->labels->singular_name )
+			);
+		}
+		printf(
+			'<p class="description">%s</p>',
+			esc_html__( 'Checked post types never get a Markdown representation.', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render: path exclusion textarea.
+	 */
+	public static function render_paths_field(): void {
+		$settings = self::get();
+		printf(
+			'<textarea name="%1$s[excluded_paths]" rows="5" cols="50" class="large-text code">%2$s</textarea><p class="description">%3$s</p>',
+			esc_attr( self::OPTION ),
+			esc_textarea( implode( "\n", (array) $settings['excluded_paths'] ) ),
+			esc_html__( 'One path per line. Exact match, or prefix match with a trailing * (e.g. /en/private/*).', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render the full settings page, including cache-layer diagnostics.
+	 */
+	public static function render_page(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+
+		$detected = CacheCompat::detect();
+		$dropin   = CacheCompat::has_advanced_cache_dropin();
+		?>
+		<div class="wrap">
+			<h1><?php esc_html_e( 'Markdown for Agents', 'bice-markdown-agents' ); ?></h1>
+
+			<form action="options.php" method="post">
+				<?php
+				settings_fields( self::PAGE );
+				do_settings_sections( self::PAGE );
+				submit_button();
+				?>
+			</form>
+
+			<hr>
+			<h2><?php esc_html_e( 'Cache layer diagnostics', 'bice-markdown-agents' ); ?></h2>
+			<table class="widefat striped" style="max-width:720px">
+				<tbody>
+					<tr>
+						<td><?php esc_html_e( 'Caching plugin detected', 'bice-markdown-agents' ); ?></td>
+						<td><?php echo esc_html( $detected ? implode( ', ', $detected ) : __( 'None recognised', 'bice-markdown-agents' ) ); ?></td>
+					</tr>
+					<tr>
+						<td><?php esc_html_e( 'advanced-cache.php drop-in', 'bice-markdown-agents' ); ?></td>
+						<td>
+							<?php
+							if ( $dropin ) {
+								$signature = CacheCompat::dropin_signature();
+								echo esc_html(
+									'' !== $signature
+										? sprintf( /* translators: %s: drop-in first comment line */ __( 'Active — signature: %s', 'bice-markdown-agents' ), $signature )
+										: __( 'Active (unidentified implementation)', 'bice-markdown-agents' )
+								);
+							} else {
+								esc_html_e( 'Not present', 'bice-markdown-agents' );
+							}
+							?>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+			<?php if ( $dropin ) : ?>
+				<div class="notice notice-warning inline" style="max-width:700px">
+					<p>
+						<strong><?php esc_html_e( 'Manual configuration required:', 'bice-markdown-agents' ); ?></strong>
+						<?php esc_html_e( 'A page-cache drop-in serves cache hits before this plugin loads, so requests with Accept: text/markdown can receive cached HTML unless the cache layer in front (drop-in, nginx, Cloudflare) is told to bypass or segment those requests. See the README section "The cache layer caveat" for the nginx snippet and the Cloudflare cache rule.', 'bice-markdown-agents' ); ?>
+					</p>
+				</div>
+			<?php endif; ?>
+		</div>
+		<?php
+	}
+}
