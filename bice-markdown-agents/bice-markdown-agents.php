@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Markdown for Agents
  * Plugin URI:        https://github.com/noordevtech/Markdown-for-Agents
- * Description:       HTTP content negotiation for AI agents: requests that genuinely prefer text/markdown receive a Markdown rendering of the page; every other request receives the normal HTML, byte-identical. Also declares AI content-usage preferences via Content Signals (contentsignals.org) in robots.txt, preserving existing rules. Self-hosted replacement for Cloudflare's "Markdown for Agents".
- * Version:           1.1.0
+ * Description:       Makes the site agent-ready: text/markdown content negotiation for AI agents (HTML stays byte-identical for humans), Content Signals in robots.txt, OAuth protected-resource metadata (RFC 9728), auth.md, an MCP server card, an agent-skills discovery index, and WebMCP browser tools. Self-hosted replacement for Cloudflare's "Markdown for Agents".
+ * Version:           1.2.0
  * Requires at least: 6.0
  * Requires PHP:      8.1
  * Author:            Bice
@@ -24,7 +24,7 @@ if ( defined( 'BICE_MDA_VERSION' ) ) {
 	return; // Already loaded (plugin + mu-loader both present).
 }
 
-define( 'BICE_MDA_VERSION', '1.1.0' );
+define( 'BICE_MDA_VERSION', '1.2.0' );
 define( 'BICE_MDA_DIR', __DIR__ );
 define( 'BICE_MDA_FILE', __FILE__ );
 

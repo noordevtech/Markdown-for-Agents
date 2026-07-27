@@ -36,6 +36,12 @@ final class Settings {
 				'ai-input' => 'yes',
 				'ai-train' => 'no',
 			),
+			'discovery_enabled'           => true,
+			'webmcp_enabled'              => true,
+			'oauth_authorization_servers' => array(),
+			'oauth_scopes'                => array(),
+			'agent_register_uri'          => '',
+			'mcp_endpoint'                => '',
 		);
 	}
 
@@ -146,6 +152,61 @@ final class Settings {
 			self::PAGE,
 			'bice_mda_signals'
 		);
+
+		add_settings_section(
+			'bice_mda_discovery',
+			__( 'Agent discovery', 'bice-markdown-agents' ),
+			array( self::class, 'render_discovery_intro' ),
+			self::PAGE
+		);
+
+		add_settings_field(
+			'discovery_enabled',
+			__( 'Discovery endpoints', 'bice-markdown-agents' ),
+			array( self::class, 'render_discovery_enabled_field' ),
+			self::PAGE,
+			'bice_mda_discovery'
+		);
+
+		add_settings_field(
+			'webmcp_enabled',
+			__( 'WebMCP browser tools', 'bice-markdown-agents' ),
+			array( self::class, 'render_webmcp_enabled_field' ),
+			self::PAGE,
+			'bice_mda_discovery'
+		);
+
+		add_settings_field(
+			'oauth_authorization_servers',
+			__( 'OAuth authorization servers', 'bice-markdown-agents' ),
+			array( self::class, 'render_oauth_servers_field' ),
+			self::PAGE,
+			'bice_mda_discovery'
+		);
+
+		add_settings_field(
+			'oauth_scopes',
+			__( 'OAuth scopes supported', 'bice-markdown-agents' ),
+			array( self::class, 'render_oauth_scopes_field' ),
+			self::PAGE,
+			'bice_mda_discovery'
+		);
+
+		add_settings_field(
+			'agent_register_uri',
+			__( 'Agent registration URL', 'bice-markdown-agents' ),
+			array( self::class, 'render_register_uri_field' ),
+			self::PAGE,
+			'bice_mda_discovery'
+		);
+
+		add_settings_field(
+			'mcp_endpoint',
+			__( 'MCP server endpoint', 'bice-markdown-agents' ),
+			array( self::class, 'render_mcp_endpoint_field' ),
+			self::PAGE,
+			'bice_mda_discovery'
+		);
 	}
 
 	/**
@@ -168,6 +229,30 @@ final class Settings {
 
 			$clean['content_signals'][ $signal ] = in_array( $value, array( 'yes', 'no' ), true ) ? $value : '';
 		}
+
+		$clean['discovery_enabled'] = ! empty( $input['discovery_enabled'] );
+		$clean['webmcp_enabled']    = ! empty( $input['webmcp_enabled'] );
+
+		$servers = array();
+		foreach ( preg_split( '/\R+/', (string) ( $input['oauth_authorization_servers'] ?? '' ) ) ?: array() as $line ) {
+			$line = esc_url_raw( trim( $line ) );
+			if ( '' !== $line ) {
+				$servers[] = $line;
+			}
+		}
+		$clean['oauth_authorization_servers'] = $servers;
+
+		$scopes = array();
+		foreach ( preg_split( '/[\s,]+/', (string) ( $input['oauth_scopes'] ?? '' ) ) ?: array() as $scope ) {
+			$scope = trim( $scope );
+			if ( '' !== $scope && preg_match( '/\A[\x21\x23-\x5B\x5D-\x7E]+\z/', $scope ) ) {
+				$scopes[] = $scope;
+			}
+		}
+		$clean['oauth_scopes'] = $scopes;
+
+		$clean['agent_register_uri'] = esc_url_raw( trim( (string) ( $input['agent_register_uri'] ?? '' ) ) );
+		$clean['mcp_endpoint']       = esc_url_raw( trim( (string) ( $input['mcp_endpoint'] ?? '' ) ) );
 
 		$public_types                 = get_post_types( array( 'public' => true ) );
 		$clean['excluded_post_types'] = array_values(
@@ -314,6 +399,94 @@ final class Settings {
 			'<p class="description">%s <code>%s</code></p>',
 			esc_html__( 'Current directive:', 'bice-markdown-agents' ),
 			esc_html( '' !== $line ? $line : __( '(none — every signal is "no preference")', 'bice-markdown-agents' ) )
+		);
+	}
+
+	/**
+	 * Render: agent discovery section intro.
+	 */
+	public static function render_discovery_intro(): void {
+		printf(
+			'<p>%s</p>',
+			esc_html__( 'Machine-readable discovery documents for AI agents: /.well-known/oauth-protected-resource (RFC 9728), /.well-known/oauth-authorization-server (+agent_auth), /auth.md, /.well-known/mcp/server-card.json (SEP-1649 draft), /.well-known/agent-skills/index.json, plus WebMCP browser tools. If your web server blocks dotfile paths, exempt /.well-known/ — see the README.', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render: discovery endpoints switch.
+	 */
+	public static function render_discovery_enabled_field(): void {
+		$settings = self::get();
+		printf(
+			'<label><input type="checkbox" name="%1$s[discovery_enabled]" value="1" %2$s> %3$s</label>',
+			esc_attr( self::OPTION ),
+			checked( $settings['discovery_enabled'], true, false ),
+			esc_html__( 'Serve the well-known discovery documents and /auth.md.', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render: WebMCP switch.
+	 */
+	public static function render_webmcp_enabled_field(): void {
+		$settings = self::get();
+		printf(
+			'<label><input type="checkbox" name="%1$s[webmcp_enabled]" value="1" %2$s> %3$s</label>',
+			esc_attr( self::OPTION ),
+			checked( $settings['webmcp_enabled'], true, false ),
+			esc_html__( 'Register site tools (search, get page as Markdown) with navigator.modelContext on page load.', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render: OAuth authorization servers textarea.
+	 */
+	public static function render_oauth_servers_field(): void {
+		$settings = self::get();
+		printf(
+			'<textarea name="%1$s[oauth_authorization_servers]" rows="3" cols="50" class="large-text code">%2$s</textarea><p class="description">%3$s</p>',
+			esc_attr( self::OPTION ),
+			esc_textarea( implode( "\n", (array) $settings['oauth_authorization_servers'] ) ),
+			esc_html__( 'One OAuth/OIDC issuer URL per line — servers that can issue tokens for this resource. Leave empty if the site has no protected APIs (the metadata will honestly say so).', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render: OAuth scopes text field.
+	 */
+	public static function render_oauth_scopes_field(): void {
+		$settings = self::get();
+		printf(
+			'<input type="text" name="%1$s[oauth_scopes]" value="%2$s" class="regular-text code"><p class="description">%3$s</p>',
+			esc_attr( self::OPTION ),
+			esc_attr( implode( ' ', (array) $settings['oauth_scopes'] ) ),
+			esc_html__( 'Space-separated scope names for scopes_supported (e.g. read write). Leave empty for none.', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render: agent registration URL.
+	 */
+	public static function render_register_uri_field(): void {
+		$settings = self::get();
+		printf(
+			'<input type="url" name="%1$s[agent_register_uri]" value="%2$s" class="regular-text code" placeholder="https://…"><p class="description">%3$s</p>',
+			esc_attr( self::OPTION ),
+			esc_attr( (string) $settings['agent_register_uri'] ),
+			esc_html__( 'register_uri for the agent_auth block in /.well-known/oauth-authorization-server. Defaults to /auth.md when empty.', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render: MCP endpoint URL.
+	 */
+	public static function render_mcp_endpoint_field(): void {
+		$settings = self::get();
+		printf(
+			'<input type="url" name="%1$s[mcp_endpoint]" value="%2$s" class="regular-text code" placeholder="https://…"><p class="description">%3$s</p>',
+			esc_attr( self::OPTION ),
+			esc_attr( (string) $settings['mcp_endpoint'] ),
+			esc_html__( 'Streamable-HTTP endpoint of a real MCP server for this site, if you run one. When empty, the server card is still published but omits the transport block rather than advertising a fake endpoint.', 'bice-markdown-agents' )
 		);
 	}
 
