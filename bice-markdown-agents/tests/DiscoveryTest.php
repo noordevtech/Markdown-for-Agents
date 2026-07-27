@@ -69,6 +69,30 @@ final class DiscoveryTest extends TestCase {
 		$this->assertNull( Discovery::match_route( $path ) );
 	}
 
+	#[DataProvider( 'tombstone_routes' )]
+	public function test_removed_routes_are_tombstoned_to_hard_404( string $path ): void {
+		// Removed routes must hard-404 even on soft-404 themes: an agent
+		// receiving a 200 would try to parse the body as metadata.
+		$this->assertTrue( Discovery::is_tombstone( $path ) );
+		$this->assertNull( Discovery::match_route( $path ) );
+	}
+
+	public static function tombstone_routes(): array {
+		return array(
+			array( '/.well-known/oauth-authorization-server' ),
+			array( '/.well-known/oauth-authorization-server/' ),
+			array( '/.well-known/mcp/server-card.json' ),
+			array( '/.well-known/mcp.json' ),
+		);
+	}
+
+	public function test_live_routes_are_not_tombstones(): void {
+		$this->assertFalse( Discovery::is_tombstone( '/auth.md' ) );
+		$this->assertFalse( Discovery::is_tombstone( '/.well-known/oauth-protected-resource' ) );
+		$this->assertFalse( Discovery::is_tombstone( '/.well-known/agent-skills/index.json' ) );
+		$this->assertFalse( Discovery::is_tombstone( '/traiteur/' ) );
+	}
+
 	public static function removed_and_unknown_routes(): array {
 		return array(
 			// Deliberately removed: a fabricated authorization server invites

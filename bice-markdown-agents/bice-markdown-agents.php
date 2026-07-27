@@ -3,7 +3,7 @@
  * Plugin Name:       Markdown for Agents
  * Plugin URI:        https://github.com/noordevtech/Markdown-for-Agents
  * Description:       Makes the site agent-ready: text/markdown content negotiation for AI agents (HTML stays byte-identical for humans), Content Signals in robots.txt, OAuth protected-resource metadata (RFC 9728), auth.md, an agent-skills discovery index, and WebMCP browser tools — every advertised URL verified to resolve (wp bice-agents verify). Self-hosted replacement for Cloudflare's "Markdown for Agents".
- * Version:           1.3.1
+ * Version:           1.3.2
  * Requires at least: 6.0
  * Requires PHP:      8.1
  * Author:            Bice
@@ -24,7 +24,7 @@ if ( defined( 'BICE_MDA_VERSION' ) ) {
 	return; // Already loaded (plugin + mu-loader both present).
 }
 
-define( 'BICE_MDA_VERSION', '1.3.1' );
+define( 'BICE_MDA_VERSION', '1.3.2' );
 define( 'BICE_MDA_DIR', __DIR__ );
 define( 'BICE_MDA_FILE', __FILE__ );
 

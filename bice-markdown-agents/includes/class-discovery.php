@@ -63,6 +63,19 @@ final class Discovery {
 	);
 
 	/**
+	 * Tombstones: routes this plugin used to serve and deliberately removed.
+	 * They must answer a hard 404 — never a soft-404 (a 200 "not found"
+	 * page) and never whatever a stale page cache replays — because an
+	 * agent probing /.well-known/oauth-authorization-server and getting a
+	 * 200 will try to parse it as authorization-server metadata.
+	 */
+	private const TOMBSTONE_ROUTES = array(
+		'/.well-known/oauth-authorization-server',
+		'/.well-known/mcp/server-card.json',
+		'/.well-known/mcp.json',
+	);
+
+	/**
 	 * Hook the discovery routes into the request lifecycle.
 	 *
 	 * @param array<string, mixed> $settings Plugin settings.
@@ -101,6 +114,25 @@ final class Discovery {
 	}
 
 	/**
+	 * Whether a path is a deliberately removed route that must hard-404.
+	 *
+	 * @param string $path URL path (no query string).
+	 * @return bool
+	 */
+	public static function is_tombstone( string $path ): bool {
+		$path = '/' . ltrim( $path, '/' );
+		$path = rtrim( $path, '/' ) ?: '/';
+
+		foreach ( self::TOMBSTONE_ROUTES as $route ) {
+			if ( strtolower( $path ) === strtolower( $route ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * Serve a discovery document and exit, when the request matches.
 	 *
 	 * Scope: anonymous front-end GET/HEAD only. Admin, AJAX, REST and
@@ -121,7 +153,19 @@ final class Discovery {
 			return;
 		}
 
-		$path    = (string) wp_parse_url( $_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH );
+		$path = (string) wp_parse_url( $_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH );
+
+		if ( self::is_tombstone( $path ) ) {
+			if ( ! defined( 'DONOTCACHEPAGE' ) ) {
+				define( 'DONOTCACHEPAGE', true );
+			}
+			nocache_headers();
+			http_response_code( 404 );
+			header( 'Content-Type: text/plain; charset=utf-8' );
+			echo "Not Found\n"; // phpcs:ignore WordPress.Security.EscapeOutput -- constant string.
+			exit;
+		}
+
 		$builder = self::match_route( $path );
 		if ( null === $builder ) {
 			return;
