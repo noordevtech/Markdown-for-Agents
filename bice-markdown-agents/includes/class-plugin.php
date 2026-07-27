@@ -64,6 +64,10 @@ final class Plugin {
 		if ( is_admin() ) {
 			Settings::init();
 		}
+
+		if ( defined( 'WP_CLI' ) && WP_CLI && class_exists( '\WP_CLI' ) ) {
+			\WP_CLI::add_command( 'bice-agents', Cli::class );
+		}
 	}
 
 	/**

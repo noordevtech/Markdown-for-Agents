@@ -1,6 +1,6 @@
 <?php
 /**
- * Agent discovery endpoints: OAuth metadata, auth.md, MCP server card,
+ * Agent discovery endpoints: OAuth protected resource metadata, auth.md,
  * agent-skills index.
  *
  * @package Bice\MarkdownAgents
@@ -9,25 +9,35 @@
 namespace Bice\MarkdownAgents;
 
 /**
- * Serves the machine-readable discovery documents that agent crawlers
- * (e.g. isitagentready.com) look for:
+ * Serves the machine-readable discovery documents that agent crawlers look
+ * for:
  *
  *  - /.well-known/oauth-protected-resource        (RFC 9728)
- *  - /.well-known/oauth-authorization-server      (RFC 8414 + agent_auth block, auth.md spec)
  *  - /auth.md                                     (workos.com/auth-md)
- *  - /.well-known/mcp/server-card.json            (MCP SEP-1649, draft)
  *  - /.well-known/agent-skills/index.json         (Agent Skills Discovery RFC v0.2.0)
  *  - /.well-known/agent-skills/markdown-for-agents/SKILL.md
+ *
+ * THE GOVERNING RULE: a discovery document is a promise to an automated
+ * client — an agent that follows a dead URL has been actively misled, which
+ * is worse than publishing nothing. Every URL and capability advertised
+ * here must resolve on the live site. Consequences of that rule:
+ *
+ *  - No /.well-known/oauth-authorization-server is served. There is no
+ *    authorization server; publishing metadata with a fabricated issuer
+ *    would invite agents into OAuth flows that cannot succeed. (A previous
+ *    version of this plugin did serve one — deliberately removed.)
+ *  - No MCP server card is served. There is no public MCP server.
+ *    (Also deliberately removed, together with the mcp_endpoint setting.)
+ *  - The PRM's empty `authorization_servers` array is deliberate and
+ *    correct: it states that no authorization server issues tokens for
+ *    this resource.
+ *  - {@see Discovery::advertised_urls()} exposes every URL the published
+ *    documents advertise, so the test suite and the `wp bice-agents verify`
+ *    CLI command can fail the moment a dead URL would be published.
  *
  * Document builders are pure functions over a config array so they can be
  * unit-tested without WordPress; {@see Discovery::register()} wires them to
  * the request.
- *
- * Standards-maturity note, also in the README: RFC 9728 and RFC 8414 are
- * published RFCs; the agent_auth block (auth.md), the MCP Server Card
- * (SEP-1649) and the Agent Skills index are early-stage/draft specs, so
- * their `$schema` URLs and exact field names are best-effort against the
- * drafts as of 2026 and may need updating as they stabilize.
  */
 final class Discovery {
 
@@ -35,15 +45,21 @@ final class Discovery {
 	 * Route table: URL path => builder method name.
 	 */
 	private const ROUTES = array(
-		'/.well-known/oauth-protected-resource'                 => 'protected_resource_metadata',
-		'/.well-known/oauth-authorization-server'               => 'authorization_server_metadata',
-		'/.well-known/mcp/server-card.json'                     => 'server_card',
-		// Alias probed by agent-readiness scanners (isitagentready.com hits
-		// both paths); serves the same server card.
-		'/.well-known/mcp.json'                                 => 'server_card',
-		'/.well-known/agent-skills/index.json'                  => 'skills_index',
+		'/.well-known/oauth-protected-resource'                  => 'protected_resource_metadata',
+		'/.well-known/agent-skills/index.json'                   => 'skills_index',
 		'/.well-known/agent-skills/markdown-for-agents/SKILL.md' => 'skill_md',
-		'/auth.md'                                              => 'auth_md',
+		'/auth.md'                                               => 'auth_md',
+	);
+
+	/**
+	 * Same-origin paths advertised in the documents that are served by other
+	 * layers (verified live), not by this plugin. The self-check accepts
+	 * these; anything else must match a plugin route or the check fails.
+	 */
+	public const EXTERNALLY_SERVED_PATHS = array(
+		'/',
+		'/robots.txt',
+		'/.well-known/api-catalog', // RFC 9727 linkset, served by nginx.
 	);
 
 	/**
@@ -87,11 +103,21 @@ final class Discovery {
 	/**
 	 * Serve a discovery document and exit, when the request matches.
 	 *
+	 * Scope: anonymous front-end GET/HEAD only. Admin, AJAX, REST and
+	 * logged-in requests fall through to normal WordPress handling.
+	 *
 	 * @param array<string, mixed> $settings Plugin settings.
 	 */
 	private static function maybe_serve( array $settings ): void {
 		$method = strtoupper( (string) ( $_SERVER['REQUEST_METHOD'] ?? '' ) );
 		if ( ! in_array( $method, array( 'GET', 'HEAD' ), true ) ) {
+			return;
+		}
+
+		if ( is_admin() || wp_doing_ajax() || wp_doing_cron()
+			|| ( defined( 'REST_REQUEST' ) && REST_REQUEST )
+			|| ( defined( 'XMLRPC_REQUEST' ) && XMLRPC_REQUEST )
+			|| is_user_logged_in() ) {
 			return;
 		}
 
@@ -104,9 +130,14 @@ final class Discovery {
 		$config   = self::config_from_wp( $settings );
 		$document = self::$builder( $config );
 
+		// Keep the WP-level page cache out of the loop entirely (these are
+		// cheap to regenerate); short public max-age still lets edges cache.
+		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
+			define( 'DONOTCACHEPAGE', true );
+		}
+
 		nocache_headers();
 		header_remove( 'Expires' );
-		// Small, public, harmless documents — let edges cache them briefly.
 		header( 'Cache-Control: public, max-age=300' );
 		header( 'X-Robots-Tag: noindex' );
 		// RFC 9728 §3.1: metadata endpoints must be readable cross-origin.
@@ -130,17 +161,28 @@ final class Discovery {
 	 * @return array<string, mixed>
 	 */
 	public static function config_from_wp( array $settings ): array {
+		$contact = trim( (string) ( $settings['contact_email'] ?? '' ) );
+		if ( '' === $contact ) {
+			$contact = (string) get_option( 'admin_email' );
+		}
+
+		$signal = '';
+		if ( ! empty( $settings['content_signals_enabled'] ) ) {
+			$signal = ContentSignals::signal_line( (array) ( $settings['content_signals'] ?? array() ) );
+		}
+
 		return array(
 			'site_url'              => untrailingslashit( home_url( '/', 'https' ) ),
 			'site_name'             => (string) get_bloginfo( 'name' ),
-			'site_description'      => (string) get_bloginfo( 'description' ),
-			'admin_email'           => (string) get_option( 'admin_email' ),
+			'contact_email'         => $contact,
 			'version'               => defined( 'BICE_MDA_VERSION' ) ? BICE_MDA_VERSION : '0',
 			'authorization_servers' => (array) ( $settings['oauth_authorization_servers'] ?? array() ),
 			'scopes'                => (array) ( $settings['oauth_scopes'] ?? array() ),
 			'register_uri'          => (string) ( $settings['agent_register_uri'] ?? '' ),
-			'mcp_endpoint'          => (string) ( $settings['mcp_endpoint'] ?? '' ),
+			'policy_uri'            => (string) ( $settings['resource_policy_uri'] ?? '' ),
+			'tos_uri'               => (string) ( $settings['resource_tos_uri'] ?? '' ),
 			'md_suffix'             => ! empty( $settings['md_suffix'] ),
+			'content_signal'        => $signal,
 		);
 	}
 
@@ -157,103 +199,33 @@ final class Discovery {
 	public static function protected_resource_metadata( array $config ): array {
 		$site = rtrim( (string) $config['site_url'], '/' );
 
-		return array(
+		$metadata = array(
 			'resource'                 => $site,
-			'resource_name'            => (string) $config['site_name'],
+			// Empty is deliberate and correct when no authorization server
+			// issues tokens for this resource — see the class docblock.
 			'authorization_servers'    => array_values( (array) $config['authorization_servers'] ),
 			'scopes_supported'         => array_values( (array) $config['scopes'] ),
 			'bearer_methods_supported' => array( 'header' ),
+			'resource_name'            => (string) $config['site_name'],
 			'resource_documentation'   => $site . '/auth.md',
 		);
-	}
 
-	/**
-	 * RFC 8414 Authorization Server Metadata with the auth.md `agent_auth`
-	 * extension block (register_uri, identity/credential types).
-	 *
-	 * When a dedicated OAuth issuer is configured, it is authoritative for
-	 * its own /.well-known/oauth-authorization-server; this document exists
-	 * so agents probing THIS origin still find registration instructions.
-	 *
-	 * @param array<string, mixed> $config Site config.
-	 * @return array<string, mixed>
-	 */
-	public static function authorization_server_metadata( array $config ): array {
-		$site         = rtrim( (string) $config['site_url'], '/' );
-		$register_uri = '' !== (string) $config['register_uri'] ? (string) $config['register_uri'] : $site . '/auth.md';
-
-		$servers = array_values( (array) $config['authorization_servers'] );
-
-		// Shape per the workos/auth.md reference: the outer fields restate the
-		// RFC 9728 PRM, the RFC 8414 fields describe this issuer, and the
-		// agent_auth block is the profile extension. Endpoint fields (token,
-		// revocation, claim) are only meaningful with a real authorization
-		// server behind them, so they are never fabricated here.
-		$metadata = array(
-			'resource'                 => $site,
-			'authorization_servers'    => $servers,
-			'scopes_supported'         => array_values( (array) $config['scopes'] ),
-			'bearer_methods_supported' => array( 'header' ),
-			'issuer'                   => $site,
-			'response_types_supported' => array( 'code' ),
-			'service_documentation'    => $site . '/auth.md',
-			'agent_auth'               => array(
-				'skill'                      => $site . '/auth.md',
-				'register_uri'               => $register_uri,
-				'identity_types_supported'   => array( 'anonymous', 'email' ),
-				'credential_types_supported' => array( 'oauth2_access_token', 'api_key' ),
-			),
-		);
+		if ( '' !== (string) $config['policy_uri'] ) {
+			$metadata['resource_policy_uri'] = (string) $config['policy_uri'];
+		}
+		if ( '' !== (string) $config['tos_uri'] ) {
+			$metadata['resource_tos_uri'] = (string) $config['tos_uri'];
+		}
 
 		return $metadata;
 	}
 
 	/**
-	 * MCP Server Card (SEP-1649, draft — schema being standardized in
-	 * modelcontextprotocol PR #2127).
-	 *
-	 * The transport block is only emitted when a real MCP endpoint is
-	 * configured; advertising a fake endpoint would be worse than none.
-	 *
-	 * @param array<string, mixed> $config Site config.
-	 * @return array<string, mixed>
-	 */
-	public static function server_card( array $config ): array {
-		$site = rtrim( (string) $config['site_url'], '/' );
-
-		$card = array(
-			'serverInfo'    => array(
-				'name'        => (string) $config['site_name'],
-				'version'     => (string) $config['version'],
-				'description' => '' !== (string) $config['site_description']
-					? (string) $config['site_description']
-					: 'Content and services of ' . (string) $config['site_name'],
-				'websiteUrl'  => $site,
-			),
-			'capabilities'  => array(
-				'resources' => array(
-					// Every public page is retrievable as text/markdown via
-					// content negotiation (this plugin).
-					'markdownNegotiation' => true,
-				),
-			),
-			'documentation' => $site . '/auth.md',
-		);
-
-		$endpoint = (string) $config['mcp_endpoint'];
-		if ( '' !== $endpoint ) {
-			$card['transport']            = array(
-				'type'     => 'streamable-http',
-				'endpoint' => $endpoint,
-			);
-			$card['capabilities']['tools'] = array( 'listChanged' => false );
-		}
-
-		return $card;
-	}
-
-	/**
 	 * Agent Skills Discovery index (RFC v0.2.0).
+	 *
+	 * The single skill it lists is served by this same plugin and documents
+	 * only capabilities that genuinely work (Markdown negotiation); the
+	 * sha256 digest is computed from the exact bytes served.
 	 *
 	 * @param array<string, mixed> $config Site config.
 	 * @return array<string, mixed>
@@ -273,7 +245,7 @@ final class Discovery {
 		);
 
 		return array(
-			// Best-effort schema URL for the draft RFC; see class docblock.
+			// Best-effort schema URL for the draft RFC.
 			'$schema' => 'https://agentskills.io/schema/v0.2.0/index.json',
 			'version' => '0.2.0',
 			'skills'  => $skills,
@@ -287,10 +259,16 @@ final class Discovery {
 	 * @return string Markdown.
 	 */
 	public static function skill_md( array $config ): string {
-		$site   = rtrim( (string) $config['site_url'], '/' );
-		$name   = (string) $config['site_name'];
+		$site = rtrim( (string) $config['site_url'], '/' );
+		$name = (string) $config['site_name'];
+		// No example URL here on purpose: a placeholder slug would be a dead
+		// link, and discovery documents must not advertise URLs that 404.
 		$suffix = ! empty( $config['md_suffix'] )
-			? "\nAny page is also available at its `index.md` suffix URL, e.g. `{$site}/example-page/index.md`.\n"
+			? "\nAny page is also available at its `index.md` suffix: append `index.md` to the page's path (a page at `/some-page/` is mirrored at `/some-page/index.md`).\n"
+			: '';
+
+		$signal_section = '' !== (string) $config['content_signal']
+			? "\n## Content-usage policy\n\nRespect the `Content-Signal` directive in {$site}/robots.txt\n(see https://contentsignals.org/): `" . (string) $config['content_signal'] . "`\n"
 			: '';
 
 		return <<<MD
@@ -320,11 +298,7 @@ explicitly with a q-value at least equal to `text/html`.
 
 HTML responses carry `Link: <url>; rel="alternate"; type="text/markdown"`.
 Authentication and registration details: {$site}/auth.md
-
-## Content-usage policy
-
-Respect the `Content-Signal` directive in {$site}/robots.txt
-(see https://contentsignals.org/).
+{$signal_section}
 MD . "\n";
 	}
 
@@ -332,7 +306,10 @@ MD . "\n";
 	 * The /auth.md document (workos.com/auth-md): agent registration and
 	 * authentication instructions in human- and machine-readable Markdown.
 	 *
-	 * Filterable via `bice_mda_auth_md` for sites that want custom content.
+	 * Every URL in the Discover table resolves on the live site — the table
+	 * lists only the Protected Resource Metadata (served here) and the
+	 * RFC 9727 API catalog (served by nginx). Filterable via
+	 * `bice_mda_auth_md` for sites that want custom content.
 	 *
 	 * @param array<string, mixed> $config Site config.
 	 * @return string Markdown.
@@ -340,43 +317,40 @@ MD . "\n";
 	public static function auth_md( array $config ): string {
 		$site     = rtrim( (string) $config['site_url'], '/' );
 		$name     = (string) $config['site_name'];
-		$email    = (string) $config['admin_email'];
+		$email    = (string) $config['contact_email'];
 		$servers  = array_values( (array) $config['authorization_servers'] );
-		$register = '' !== (string) $config['register_uri'] ? (string) $config['register_uri'] : '';
+		$register = (string) $config['register_uri'];
 
 		$auth_section = array() !== $servers
 			? "Tokens for protected resources are issued by:\n\n"
 				. implode( "\n", array_map( static fn( $s ) => '- ' . $s, $servers ) )
-				. "\n\nUse the metadata from Step 1 to obtain an access token, then send it as `Authorization: Bearer <token>`."
-			: "All published content on this site is public and requires **no authentication** — you can skip registration and read everything right now. There is currently no OAuth authorization server issuing tokens for this resource; the Protected Resource Metadata reflects that with an empty `authorization_servers` list.";
+				. "\n\nUse the Protected Resource Metadata to identify the resource and scopes, then send the token as `Authorization: Bearer <token>`."
+			: "All published content on this site is public and requires **no authentication** — you can skip registration and read everything right now. There is no OAuth authorization server issuing tokens for this resource; the Protected Resource Metadata states that with an empty `authorization_servers` list.";
 
 		$register_section = '' !== $register
 			? "Register as an agent at: {$register}"
 			: 'No self-service agent registration is currently open. For elevated or programmatic access (APIs, reservations, partnerships), contact the site operator'
 				. ( '' !== $email ? " at {$email}." : '.' );
 
+		$signal_section = '' !== (string) $config['content_signal']
+			? "\n## Content-usage policy\n\nRespect the `Content-Signal` directive in {$site}/robots.txt\n(https://contentsignals.org/): `" . (string) $config['content_signal'] . "` — AI\nanswer-time use is welcome; training use is not permitted.\n"
+			: '';
+
 		$markdown = <<<MD
 # auth.md
 
 You are an agent reading **{$name}**. This document follows the auth.md
 convention (https://workos.com/auth-md): discover → access → register.
-Follow the steps in order.
+Every URL below resolves; nothing aspirational is listed.
 
 ## Step 1 — Discover
-
-Fetch the machine-readable metadata for this origin:
 
 | Document | URL |
 |---|---|
 | Protected Resource Metadata (RFC 9728) | {$site}/.well-known/oauth-protected-resource |
-| Authorization Server metadata + `agent_auth` block | {$site}/.well-known/oauth-authorization-server |
-| MCP server card (SEP-1649) | {$site}/.well-known/mcp/server-card.json |
-| Agent skills index | {$site}/.well-known/agent-skills/index.json |
+| API catalog (RFC 9727 linkset) | {$site}/.well-known/api-catalog |
 
-The `agent_auth` block carries `skill` (this document), `register_uri`,
-`identity_types_supported` and `credential_types_supported`.
-
-## Step 2 — Access public content
+## Step 2 — Access content
 
 {$auth_section}
 
@@ -387,12 +361,7 @@ Every page is available as Markdown via content negotiation — send
 ## Step 3 — Register
 
 {$register_section}
-
-## Content-usage policy
-
-Respect the `Content-Signal` directive in {$site}/robots.txt
-(https://contentsignals.org/): AI answer-time use is welcome; training use
-is not permitted.
+{$signal_section}
 MD . "\n";
 
 		if ( function_exists( 'apply_filters' ) ) {
@@ -400,5 +369,71 @@ MD . "\n";
 		}
 
 		return $markdown;
+	}
+
+	// ------------------------------------------------------------------
+	// Self-check support.
+	// ------------------------------------------------------------------
+
+	/**
+	 * Every URL the published discovery documents advertise.
+	 *
+	 * This is what makes the plugin structurally unable to advertise a dead
+	 * link: the test suite asserts each same-origin URL maps to a served
+	 * route or a verified externally-served path, and `wp bice-agents
+	 * verify` probes each one live for 200 + a sane content type.
+	 *
+	 * Excluded on purpose: mailto: contacts, and the configured
+	 * registration URI — per the auth.md spec, probing registration
+	 * endpoints can create accounts or issue credentials. Discovery
+	 * documents only.
+	 *
+	 * @param array<string, mixed> $config Site config.
+	 * @return string[] Deduplicated absolute URLs.
+	 */
+	public static function advertised_urls( array $config ): array {
+		$encode = function_exists( 'wp_json_encode' ) ? 'wp_json_encode' : 'json_encode';
+
+		$documents = array(
+			self::auth_md( $config ),
+			self::skill_md( $config ),
+			$encode( self::protected_resource_metadata( $config ) ),
+			$encode( self::skills_index( $config ) ),
+		);
+
+		$urls = array();
+		foreach ( $documents as $document ) {
+			if ( ! is_string( $document ) ) {
+				continue;
+			}
+			preg_match_all( '#https?://[^\s()<>"\'`|\\\\]+#i', $document, $matches );
+			foreach ( $matches[0] as $url ) {
+				$urls[ rtrim( $url, '.,;:' ) ] = true;
+			}
+		}
+
+		$register = (string) $config['register_uri'];
+
+		$urls = array_keys( $urls );
+		$urls = array_filter(
+			$urls,
+			static function ( string $url ) use ( $register ): bool {
+				if ( '' !== $register && rtrim( $url, '/' ) === rtrim( $register, '/' ) ) {
+					return false; // Never probe registration endpoints.
+				}
+				// Spec/reference links to third-party sites are documentation,
+				// not capability claims about this origin.
+				foreach ( array( 'https://workos.com', 'https://contentsignals.org', 'https://agentskills.io' ) as $external_doc ) {
+					if ( str_starts_with( $url, $external_doc ) ) {
+						return false;
+					}
+				}
+				return true;
+			}
+		);
+
+		sort( $urls );
+
+		return array_values( $urls );
 	}
 }

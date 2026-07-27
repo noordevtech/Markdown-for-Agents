@@ -4,9 +4,10 @@ Makes a WordPress site agent-ready. HTTP content negotiation: AI agents
 that request `Accept: text/markdown` receive a Markdown rendering of the
 page; every other request receives the normal HTML, byte-identical. Plus
 [Content Signals](https://contentsignals.org/) in robots.txt, OAuth
-protected-resource metadata (RFC 9728), `/auth.md`, an MCP server card,
-an agent-skills discovery index, and WebMCP browser tools. A self-hosted
-replacement for Cloudflare's Pro-plan-gated "Markdown for Agents" feature.
+protected-resource metadata (RFC 9728), `/auth.md`, an agent-skills
+discovery index, and WebMCP browser tools — every advertised URL verified
+to resolve. A self-hosted replacement for Cloudflare's Pro-plan-gated
+"Markdown for Agents" feature.
 
 **The plugin lives in [`bice-markdown-agents/`](bice-markdown-agents/) —
 full documentation, including the critical cache-layer caveat and
@@ -28,13 +29,13 @@ Quick facts:
   ai-train=no` by default, configurable per signal), inserted surgically so
   existing WordPress/WooCommerce/SEO-plugin rules are preserved.
 - Agent discovery: `/.well-known/oauth-protected-resource` (RFC 9728),
-  `/.well-known/oauth-authorization-server` (+`agent_auth`), `/auth.md`,
-  `/.well-known/mcp/server-card.json` (SEP-1649 draft), and
-  `/.well-known/agent-skills/index.json` with a real SKILL.md — honest
-  defaults that never invent OAuth/MCP infrastructure, configurable when
-  the real thing exists. nginx snippet included for the usual dotfile-deny
-  403 on `/.well-known/`.
+  `/auth.md`, and `/.well-known/agent-skills/index.json` with a real
+  SKILL.md — governed by the rule that every advertised URL must resolve,
+  enforced structurally in the test suite and live via
+  `wp bice-agents verify`. No fabricated authorization server, no MCP
+  server card for a server that doesn't exist. nginx snippet included for
+  the usual dotfile-deny 403 on `/.well-known/`.
 - WebMCP: `navigator.modelContext.provideContext()` tools
   (`search_content`, `get_page_markdown`) for browser-embedded agents.
 - Works as a normal plugin or from `mu-plugins/` via the bundled loader.
-- 164 PHPUnit tests; `league/html-to-markdown` bundled in `vendor/`.
+- 170 PHPUnit tests; `league/html-to-markdown` bundled in `vendor/`.

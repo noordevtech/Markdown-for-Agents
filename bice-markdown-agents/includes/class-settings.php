@@ -41,7 +41,9 @@ final class Settings {
 			'oauth_authorization_servers' => array(),
 			'oauth_scopes'                => array(),
 			'agent_register_uri'          => '',
-			'mcp_endpoint'                => '',
+			'contact_email'               => '',
+			'resource_policy_uri'         => '',
+			'resource_tos_uri'            => '',
 		);
 	}
 
@@ -201,9 +203,25 @@ final class Settings {
 		);
 
 		add_settings_field(
-			'mcp_endpoint',
-			__( 'MCP server endpoint', 'bice-markdown-agents' ),
-			array( self::class, 'render_mcp_endpoint_field' ),
+			'contact_email',
+			__( 'Agent contact email', 'bice-markdown-agents' ),
+			array( self::class, 'render_contact_email_field' ),
+			self::PAGE,
+			'bice_mda_discovery'
+		);
+
+		add_settings_field(
+			'resource_policy_uri',
+			__( 'Resource policy URL', 'bice-markdown-agents' ),
+			array( self::class, 'render_policy_uri_field' ),
+			self::PAGE,
+			'bice_mda_discovery'
+		);
+
+		add_settings_field(
+			'resource_tos_uri',
+			__( 'Terms of service URL', 'bice-markdown-agents' ),
+			array( self::class, 'render_tos_uri_field' ),
 			self::PAGE,
 			'bice_mda_discovery'
 		);
@@ -251,8 +269,10 @@ final class Settings {
 		}
 		$clean['oauth_scopes'] = $scopes;
 
-		$clean['agent_register_uri'] = esc_url_raw( trim( (string) ( $input['agent_register_uri'] ?? '' ) ) );
-		$clean['mcp_endpoint']       = esc_url_raw( trim( (string) ( $input['mcp_endpoint'] ?? '' ) ) );
+		$clean['agent_register_uri']  = esc_url_raw( trim( (string) ( $input['agent_register_uri'] ?? '' ) ) );
+		$clean['contact_email']       = sanitize_email( (string) ( $input['contact_email'] ?? '' ) );
+		$clean['resource_policy_uri'] = esc_url_raw( trim( (string) ( $input['resource_policy_uri'] ?? '' ) ) );
+		$clean['resource_tos_uri']    = esc_url_raw( trim( (string) ( $input['resource_tos_uri'] ?? '' ) ) );
 
 		$public_types                 = get_post_types( array( 'public' => true ) );
 		$clean['excluded_post_types'] = array_values(
@@ -408,7 +428,7 @@ final class Settings {
 	public static function render_discovery_intro(): void {
 		printf(
 			'<p>%s</p>',
-			esc_html__( 'Machine-readable discovery documents for AI agents: /.well-known/oauth-protected-resource (RFC 9728), /.well-known/oauth-authorization-server (+agent_auth), /auth.md, /.well-known/mcp/server-card.json (SEP-1649 draft), /.well-known/agent-skills/index.json, plus WebMCP browser tools. If your web server blocks dotfile paths, exempt /.well-known/ — see the README.', 'bice-markdown-agents' )
+			esc_html__( 'Machine-readable discovery documents for AI agents: /.well-known/oauth-protected-resource (RFC 9728), /auth.md, /.well-known/agent-skills/index.json, plus WebMCP browser tools. Every advertised URL must resolve — run "wp bice-agents verify" after changing these. If your web server blocks dotfile paths, exempt /.well-known/ — see the README.', 'bice-markdown-agents' )
 		);
 	}
 
@@ -478,15 +498,41 @@ final class Settings {
 	}
 
 	/**
-	 * Render: MCP endpoint URL.
+	 * Render: agent contact email.
 	 */
-	public static function render_mcp_endpoint_field(): void {
+	public static function render_contact_email_field(): void {
 		$settings = self::get();
 		printf(
-			'<input type="url" name="%1$s[mcp_endpoint]" value="%2$s" class="regular-text code" placeholder="https://…"><p class="description">%3$s</p>',
+			'<input type="email" name="%1$s[contact_email]" value="%2$s" class="regular-text code" placeholder="info@…"><p class="description">%3$s</p>',
 			esc_attr( self::OPTION ),
-			esc_attr( (string) $settings['mcp_endpoint'] ),
-			esc_html__( 'Streamable-HTTP endpoint of a real MCP server for this site, if you run one. When empty, the server card is still published but omits the transport block rather than advertising a fake endpoint.', 'bice-markdown-agents' )
+			esc_attr( (string) $settings['contact_email'] ),
+			esc_html__( 'Contact shown in auth.md for agents seeking programmatic access. Falls back to the WordPress admin email when empty.', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render: resource policy URL (RFC 9728 resource_policy_uri).
+	 */
+	public static function render_policy_uri_field(): void {
+		$settings = self::get();
+		printf(
+			'<input type="url" name="%1$s[resource_policy_uri]" value="%2$s" class="regular-text code" placeholder="https://…"><p class="description">%3$s</p>',
+			esc_attr( self::OPTION ),
+			esc_attr( (string) $settings['resource_policy_uri'] ),
+			esc_html__( 'resource_policy_uri in the RFC 9728 metadata (e.g. your conditions of use page). Omitted when empty.', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render: terms of service URL (RFC 9728 resource_tos_uri).
+	 */
+	public static function render_tos_uri_field(): void {
+		$settings = self::get();
+		printf(
+			'<input type="url" name="%1$s[resource_tos_uri]" value="%2$s" class="regular-text code" placeholder="https://…"><p class="description">%3$s</p>',
+			esc_attr( self::OPTION ),
+			esc_attr( (string) $settings['resource_tos_uri'] ),
+			esc_html__( 'resource_tos_uri in the RFC 9728 metadata. Omitted when empty.', 'bice-markdown-agents' )
 		);
 	}
 

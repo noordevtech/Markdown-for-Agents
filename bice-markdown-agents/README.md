@@ -15,9 +15,9 @@ Pro-plan-gated "Markdown for Agents" feature.
   ([contentsignals.org](https://contentsignals.org/)) in `robots.txt`,
   preserving every existing rule.
 - **Agent discovery endpoints**: OAuth protected-resource metadata
-  (RFC 9728), authorization-server metadata with an `agent_auth` block,
-  `/auth.md`, an MCP server card (SEP-1649 draft), and an agent-skills
-  discovery index with a real SKILL.md.
+  (RFC 9728), `/auth.md`, and an agent-skills discovery index with a real
+  SKILL.md — governed by one rule: **every advertised URL must resolve**,
+  enforced by the test suite and `wp bice-agents verify`.
 - **WebMCP**: registers site tools (`search_content`, `get_page_markdown`)
   with `navigator.modelContext.provideContext()` on page load.
 
@@ -204,17 +204,21 @@ add the directive in that layer instead.
 
 ## Agent discovery endpoints
 
+**The governing rule: a discovery document is a promise to an automated
+client.** An agent that follows a dead URL has been actively misled — worse
+than publishing nothing. Every URL and capability advertised must resolve
+on the live site; anything that can't be made true is removed, not
+documented aspirationally. This is enforced (see "Self-check" below).
+
 Enabled by default (switchable under **Settings → Markdown for Agents →
-Agent discovery**), the plugin serves these virtual routes for front-end
-GET/HEAD requests:
+Agent discovery**), the plugin serves these virtual routes for anonymous
+front-end GET/HEAD requests (never for logged-in users, admin, AJAX, cron
+or REST requests; `DONOTCACHEPAGE` keeps the WP page cache out):
 
 | Route | Spec | Content |
 |---|---|---|
-| `/.well-known/oauth-protected-resource` | RFC 9728 | `resource`, `resource_name`, `authorization_servers`, `scopes_supported`, `bearer_methods_supported`, `resource_documentation` |
-| `/.well-known/oauth-authorization-server` | RFC 8414 + auth.md `agent_auth` | Restated PRM fields plus `issuer`, `response_types_supported`, and an `agent_auth` block (`skill`, `register_uri`, identity/credential types) per the [workos/auth.md](https://github.com/workos/auth.md) reference shape |
-| `/auth.md` | [workos.com/auth-md](https://workos.com/auth-md) | Agent registration/authentication instructions with the canonical `# auth.md` H1 and the spec's discover → access → register step structure; customizable via the `bice_mda_auth_md` filter |
-| `/.well-known/mcp/server-card.json` | MCP [SEP-1649](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2127) (draft) | `serverInfo` (name, version), `capabilities`, `transport` (only when a real MCP endpoint is configured) |
-| `/.well-known/mcp.json` | — | Alias for the server card; agent-readiness scanners probe both paths |
+| `/.well-known/oauth-protected-resource` | RFC 9728 | `resource`, empty `authorization_servers` (deliberate — no AS issues tokens for this resource), `scopes_supported`, `bearer_methods_supported`, `resource_name`, `resource_documentation`, plus `resource_policy_uri` / `resource_tos_uri` when configured |
+| `/auth.md` | [workos.com/auth-md](https://workos.com/auth-md) | Canonical `# auth.md` H1; a Discover table listing **only documents that resolve** (the PRM and the nginx-served RFC 9727 `/.well-known/api-catalog`); honest public-access text; contact route for programmatic access; `Content-Signal` paragraph matching robots.txt exactly. Customizable via the `bice_mda_auth_md` filter |
 | `/.well-known/agent-skills/index.json` | [Agent Skills Discovery RFC v0.2.0](https://github.com/cloudflare/agent-skills-discovery-rfc) | `$schema`, `skills[]` with `name`, `type`, `description`, `url`, `sha256` |
 | `/.well-known/agent-skills/markdown-for-agents/SKILL.md` | — | A genuine skill teaching agents to read this site as Markdown; its `sha256` in the index always matches the served bytes |
 
@@ -222,22 +226,37 @@ All responses are `Cache-Control: public, max-age=300`,
 `Access-Control-Allow-Origin: *` (RFC 9728 requires cross-origin
 readability) and `X-Robots-Tag: noindex`.
 
-**Honesty defaults** — the documents never invent infrastructure:
+**Deliberately not served** (removed in 1.3.0 under the governing rule):
 
-- With no OAuth issuers configured, `authorization_servers` is an empty
-  list and `/auth.md` states plainly that public content needs no
-  authentication, pointing programmatic-access requests at the site
-  admin email. Fill in **OAuth authorization servers**, **scopes** and the
-  **agent registration URL** in settings when real infrastructure exists.
-- With no **MCP server endpoint** configured, the server card is still
-  published (valid `serverInfo` + `capabilities`) but omits the
-  `transport` block rather than advertising a fake endpoint.
+- `/.well-known/oauth-authorization-server` — there is no authorization
+  server; publishing metadata with a fabricated `issuer` invites agents
+  into OAuth flows that cannot succeed. If a real AS ever exists, it is
+  authoritative for its own metadata at its own origin.
+- `/.well-known/mcp/server-card.json` and `/.well-known/mcp.json` — there
+  is no public MCP server. A server card implies a server. The
+  `mcp_endpoint` setting was removed with it, which also closes the risk
+  of an authenticated admin-connector URL ever being published.
 
-**Standards maturity**: RFC 9728 and RFC 8414 are published RFCs. The
-`agent_auth` block (auth.md), the MCP Server Card (SEP-1649) and the Agent
-Skills index/`$schema` URL are early-stage drafts — field names are
-best-effort against the drafts as of 2026 and may need updating as they
-stabilize (flagged in `includes/class-discovery.php`).
+### Self-check: regressions are detectable
+
+Two layers keep the documents honest:
+
+1. **PHPUnit (structural)** — `DiscoveryTest` extracts every URL from the
+   generated auth.md, SKILL.md, PRM and skills index
+   (`Discovery::advertised_urls()`) and fails unless each same-origin URL
+   maps to a plugin-served route, a verified externally-served path
+   (`/robots.txt`, `/.well-known/api-catalog`), or an operator-configured
+   page. It also asserts the removed routes stay removed and that no
+   document ever references admin connectors or credential-bearing URLs.
+2. **WP-CLI (live)** — `wp bice-agents verify` fetches every advertised
+   URL on the running site and fails on any non-200 or unexpected content
+   type. Run it after deploys and settings changes. Registration
+   endpoints are never probed (per the auth.md spec, that can create
+   accounts or issue credentials) — discovery documents only.
+
+**Standards maturity**: RFC 9728 is a published RFC; the auth.md
+convention and the Agent Skills index/`$schema` URL are early-stage drafts —
+best-effort against the drafts as of 2026.
 
 ### Troubleshooting: 403 on `/.well-known/*` while `/auth.md` works
 
@@ -328,20 +347,39 @@ curl -s $SITE/robots.txt | grep -i content-signal
 # → Content-Signal: search=yes, ai-input=yes, ai-train=no
 
 # 9. Discovery endpoints answer 200 with JSON / markdown
-curl -s $SITE/.well-known/oauth-protected-resource | jq .resource
-curl -s $SITE/.well-known/oauth-authorization-server | jq .agent_auth
-curl -s $SITE/.well-known/mcp/server-card.json | jq .serverInfo
+curl -sI $SITE/.well-known/oauth-protected-resource | grep -iE 'HTTP|content-type'
+# → 200, application/json
 curl -s $SITE/.well-known/agent-skills/index.json | jq '.skills[0]'
 curl -s $SITE/auth.md | head -5
 
-# 10. Skills digest integrity: sha256 in the index matches the SKILL.md bytes
+# 10. The fake authorization server and MCP card are gone
+curl -s -o /dev/null -w '%{http_code}\n' $SITE/.well-known/oauth-authorization-server
+curl -s -o /dev/null -w '%{http_code}\n' $SITE/.well-known/mcp/server-card.json
+# → 404, 404
+
+# 11. Dotfiles are still blocked — the nginx change must not widen exposure
+curl -s -o /dev/null -w '%{http_code}\n' $SITE/.htaccess
+# → 403
+
+# 12. auth.md advertises nothing that fails to resolve
+curl -s $SITE/auth.md | grep -oE "$SITE[^ )|\`]*" | sort -u | \
+  while read u; do printf '%-60s %s\n' "$u" "$(curl -s -o /dev/null -w '%{http_code}' "$u")"; done
+# → every line 200
+
+# 13. Skills digest integrity: sha256 in the index matches the SKILL.md bytes
 curl -s $SITE/.well-known/agent-skills/markdown-for-agents/SKILL.md | sha256sum
 curl -s $SITE/.well-known/agent-skills/index.json | jq -r '.skills[0].sha256'
 # → identical hashes
 
-# 11. WebMCP script present on pages
+# 14. WebMCP script present on pages
 curl -s $SITE/ | grep -o 'webmcp\.js[^"]*'
+
+# Or run the built-in live self-check from the server:
+wp bice-agents verify
 ```
+
+Note: behind Cloudflare, verify against the origin first, then purge the
+cache before testing the public URLs.
 
 External validation:
 
@@ -355,7 +393,7 @@ curl -s -X POST https://isitagentready.com/api/scan \
 
 ```bash
 composer install          # dev deps (PHPUnit)
-vendor/bin/phpunit        # 164 tests: parser, guards, converter, signals, discovery
+vendor/bin/phpunit        # 170 tests: parser, guards, converter, signals, discovery
 composer install --no-dev # before committing vendor/ for deployment
 ```
 
@@ -366,5 +404,6 @@ headings, lists, tables, blockquotes, lazy images, JSON-LD, cookie-banner
 stripping, malformed HTML, entities, nested inline elements), the
 Content Signals robots.txt logic (directive building, surgical insertion,
 rule preservation, idempotency), and the agent discovery documents
-(route matching, RFC 9728/8414 shapes, agent_auth block, server card
-with/without endpoint, skills index digest integrity, auth.md content).
+(route matching including removed routes staying removed, RFC 9728 shape,
+skills index digest integrity, auth.md content, and the structural
+self-check that every advertised URL maps to something that serves it).
