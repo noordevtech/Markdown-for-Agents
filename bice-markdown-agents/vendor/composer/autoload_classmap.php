@@ -8,6 +8,7 @@ $baseDir = dirname($vendorDir);
 return array(
     'Bice\\MarkdownAgents\\AcceptParser' => $baseDir . '/includes/class-accept-parser.php',
     'Bice\\MarkdownAgents\\CacheCompat' => $baseDir . '/includes/class-cache-compat.php',
+    'Bice\\MarkdownAgents\\ContentSignals' => $baseDir . '/includes/class-content-signals.php',
     'Bice\\MarkdownAgents\\Converter' => $baseDir . '/includes/class-converter.php',
     'Bice\\MarkdownAgents\\Plugin' => $baseDir . '/includes/class-plugin.php',
     'Bice\\MarkdownAgents\\ScopeGuard' => $baseDir . '/includes/class-scope-guard.php',

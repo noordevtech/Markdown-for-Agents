@@ -23,6 +23,7 @@ class ComposerStaticInitb73344aef18d2d2f321e3e886302d659
     public static $classMap = array (
         'Bice\\MarkdownAgents\\AcceptParser' => __DIR__ . '/../..' . '/includes/class-accept-parser.php',
         'Bice\\MarkdownAgents\\CacheCompat' => __DIR__ . '/../..' . '/includes/class-cache-compat.php',
+        'Bice\\MarkdownAgents\\ContentSignals' => __DIR__ . '/../..' . '/includes/class-content-signals.php',
         'Bice\\MarkdownAgents\\Converter' => __DIR__ . '/../..' . '/includes/class-converter.php',
         'Bice\\MarkdownAgents\\Plugin' => __DIR__ . '/../..' . '/includes/class-plugin.php',
         'Bice\\MarkdownAgents\\ScopeGuard' => __DIR__ . '/../..' . '/includes/class-scope-guard.php',

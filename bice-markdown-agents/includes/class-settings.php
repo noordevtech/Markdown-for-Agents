@@ -24,10 +24,18 @@ final class Settings {
 	 */
 	public static function defaults(): array {
 		return array(
-			'enabled'             => true,
-			'md_suffix'           => false,
-			'excluded_post_types' => array(),
-			'excluded_paths'      => array(),
+			'enabled'                 => true,
+			'md_suffix'               => false,
+			'excluded_post_types'     => array(),
+			'excluded_paths'          => array(),
+			'content_signals_enabled' => true,
+			// Default policy: discoverability and answer-time use are wanted
+			// (they return links, visits, bookings); training returns nothing.
+			'content_signals'         => array(
+				'search'   => 'yes',
+				'ai-input' => 'yes',
+				'ai-train' => 'no',
+			),
 		);
 	}
 
@@ -115,6 +123,29 @@ final class Settings {
 			self::PAGE,
 			'bice_mda_main'
 		);
+
+		add_settings_section(
+			'bice_mda_signals',
+			__( 'Content Signals (robots.txt)', 'bice-markdown-agents' ),
+			array( self::class, 'render_signals_intro' ),
+			self::PAGE
+		);
+
+		add_settings_field(
+			'content_signals_enabled',
+			__( 'Declare Content Signals', 'bice-markdown-agents' ),
+			array( self::class, 'render_signals_enabled_field' ),
+			self::PAGE,
+			'bice_mda_signals'
+		);
+
+		add_settings_field(
+			'content_signals',
+			__( 'Policy', 'bice-markdown-agents' ),
+			array( self::class, 'render_signals_policy_field' ),
+			self::PAGE,
+			'bice_mda_signals'
+		);
 	}
 
 	/**
@@ -127,8 +158,16 @@ final class Settings {
 		$input = is_array( $input ) ? $input : array();
 		$clean = self::defaults();
 
-		$clean['enabled']   = ! empty( $input['enabled'] );
-		$clean['md_suffix'] = ! empty( $input['md_suffix'] );
+		$clean['enabled']                 = ! empty( $input['enabled'] );
+		$clean['md_suffix']               = ! empty( $input['md_suffix'] );
+		$clean['content_signals_enabled'] = ! empty( $input['content_signals_enabled'] );
+
+		$clean['content_signals'] = array();
+		foreach ( ContentSignals::SIGNALS as $signal ) {
+			$value = strtolower( trim( (string) ( $input['content_signals'][ $signal ] ?? '' ) ) );
+
+			$clean['content_signals'][ $signal ] = in_array( $value, array( 'yes', 'no' ), true ) ? $value : '';
+		}
 
 		$public_types                 = get_post_types( array( 'public' => true ) );
 		$clean['excluded_post_types'] = array_values(
@@ -211,6 +250,70 @@ final class Settings {
 			esc_attr( self::OPTION ),
 			esc_textarea( implode( "\n", (array) $settings['excluded_paths'] ) ),
 			esc_html__( 'One path per line. Exact match, or prefix match with a trailing * (e.g. /en/private/*).', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render: Content Signals section intro.
+	 */
+	public static function render_signals_intro(): void {
+		printf(
+			'<p>%s <a href="https://contentsignals.org/" target="_blank" rel="noopener">contentsignals.org</a></p>',
+			esc_html__( 'Publish machine-readable AI content-usage preferences in robots.txt. Existing robots.txt rules (WordPress, WooCommerce, SEO plugins) are preserved; the directive is inserted into the first User-agent: * group.', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render: Content Signals switch.
+	 */
+	public static function render_signals_enabled_field(): void {
+		$settings = self::get();
+		printf(
+			'<label><input type="checkbox" name="%1$s[content_signals_enabled]" value="1" %2$s> %3$s</label>',
+			esc_attr( self::OPTION ),
+			checked( $settings['content_signals_enabled'], true, false ),
+			esc_html__( 'Add a Content-Signal directive to robots.txt (only on public sites).', 'bice-markdown-agents' )
+		);
+	}
+
+	/**
+	 * Render: per-signal yes/no/no-preference selectors.
+	 */
+	public static function render_signals_policy_field(): void {
+		$settings = self::get();
+		$policy   = (array) $settings['content_signals'];
+
+		$labels = array(
+			'search'   => __( 'build a search index; return links and short excerpts', 'bice-markdown-agents' ),
+			'ai-input' => __( 'supply content to a model at answer time (RAG, live answers)', 'bice-markdown-agents' ),
+			'ai-train' => __( 'use content to train or fine-tune a model', 'bice-markdown-agents' ),
+		);
+
+		foreach ( ContentSignals::SIGNALS as $signal ) {
+			$current = (string) ( $policy[ $signal ] ?? '' );
+			printf(
+				'<p><select name="%1$s[content_signals][%2$s]">
+					<option value="" %3$s>%4$s</option>
+					<option value="yes" %5$s>%6$s</option>
+					<option value="no" %7$s>%8$s</option>
+				</select> <code>%2$s</code> — %9$s</p>',
+				esc_attr( self::OPTION ),
+				esc_attr( $signal ),
+				selected( $current, '', false ),
+				esc_html__( 'No preference', 'bice-markdown-agents' ),
+				selected( $current, 'yes', false ),
+				esc_html__( 'Yes', 'bice-markdown-agents' ),
+				selected( $current, 'no', false ),
+				esc_html__( 'No', 'bice-markdown-agents' ),
+				esc_html( $labels[ $signal ] )
+			);
+		}
+
+		$line = ContentSignals::signal_line( $policy );
+		printf(
+			'<p class="description">%s <code>%s</code></p>',
+			esc_html__( 'Current directive:', 'bice-markdown-agents' ),
+			esc_html( '' !== $line ? $line : __( '(none — every signal is "no preference")', 'bice-markdown-agents' ) )
 		);
 	}
 

@@ -72,6 +72,10 @@ final class Plugin {
 	public function setup(): void {
 		$settings = Settings::get();
 
+		// Content Signals in robots.txt has its own switch, independent of
+		// the Markdown negotiation master switch.
+		ContentSignals::register( $settings );
+
 		if ( ! $settings['enabled'] ) {
 			return;
 		}
