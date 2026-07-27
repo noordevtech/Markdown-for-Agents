@@ -121,14 +121,26 @@ final class DiscoveryTest extends TestCase {
 		$this->assertSame( 'https://example.test/auth.md', $doc['service_documentation'] );
 	}
 
+	public function test_authorization_server_metadata_restates_prm_fields(): void {
+		// Per the workos/auth.md reference shape, the outer fields restate the
+		// RFC 9728 Protected Resource Metadata.
+		$doc = Discovery::authorization_server_metadata(
+			self::config( array( 'authorization_servers' => array( 'https://auth.example.test' ) ) )
+		);
+
+		$this->assertSame( 'https://example.test', $doc['resource'] );
+		$this->assertSame( array( 'https://auth.example.test' ), $doc['authorization_servers'] );
+		$this->assertSame( array( 'header' ), $doc['bearer_methods_supported'] );
+	}
+
 	public function test_agent_auth_block_defaults_register_uri_to_auth_md(): void {
 		$doc = Discovery::authorization_server_metadata( self::config() );
 
 		$agent_auth = $doc['agent_auth'];
+		$this->assertSame( 'https://example.test/auth.md', $agent_auth['skill'] );
 		$this->assertSame( 'https://example.test/auth.md', $agent_auth['register_uri'] );
-		$this->assertNotEmpty( $agent_auth['identity_types_supported'] );
+		$this->assertContains( 'anonymous', $agent_auth['identity_types_supported'] );
 		$this->assertNotEmpty( $agent_auth['credential_types_supported'] );
-		$this->assertArrayNotHasKey( 'authorization_servers', $agent_auth );
 	}
 
 	public function test_agent_auth_block_uses_configured_register_uri_and_issuers(): void {
@@ -142,7 +154,7 @@ final class DiscoveryTest extends TestCase {
 		);
 
 		$this->assertSame( 'https://example.test/agents/register', $doc['agent_auth']['register_uri'] );
-		$this->assertSame( array( 'https://auth.example.test' ), $doc['agent_auth']['authorization_servers'] );
+		$this->assertSame( array( 'https://auth.example.test' ), $doc['authorization_servers'] );
 	}
 
 	// ------------------------------------------------------------------
@@ -222,10 +234,19 @@ final class DiscoveryTest extends TestCase {
 	// auth.md.
 	// ------------------------------------------------------------------
 
+	public function test_auth_md_starts_with_canonical_heading(): void {
+		// The auth.md convention (and the isitagentready.com validator)
+		// expects the document's H1 to be exactly "# auth.md".
+		$md = Discovery::auth_md( self::config() );
+
+		$this->assertStringStartsWith( "# auth.md\n", $md );
+		$this->assertSame( 1, preg_match_all( '/^# /m', $md ), 'Exactly one H1.' );
+	}
+
 	public function test_auth_md_default_states_public_access_and_contact(): void {
 		$md = Discovery::auth_md( self::config() );
 
-		$this->assertStringContainsString( '# Agent authentication — Maison Bice', $md );
+		$this->assertStringContainsString( 'Maison Bice', $md );
 		$this->assertStringContainsString( 'no authentication', $md );
 		$this->assertStringContainsString( 'info@example.test', $md );
 		$this->assertStringContainsString( '/.well-known/oauth-protected-resource', $md );

@@ -211,8 +211,8 @@ GET/HEAD requests:
 | Route | Spec | Content |
 |---|---|---|
 | `/.well-known/oauth-protected-resource` | RFC 9728 | `resource`, `resource_name`, `authorization_servers`, `scopes_supported`, `bearer_methods_supported`, `resource_documentation` |
-| `/.well-known/oauth-authorization-server` | RFC 8414 + auth.md `agent_auth` | `issuer`, `response_types_supported`, and an `agent_auth` block with `register_uri`, identity/credential types |
-| `/auth.md` | [workos.com/auth-md](https://workos.com/auth-md) | Human/machine-readable agent registration and authentication instructions; customizable via the `bice_mda_auth_md` filter |
+| `/.well-known/oauth-authorization-server` | RFC 8414 + auth.md `agent_auth` | Restated PRM fields plus `issuer`, `response_types_supported`, and an `agent_auth` block (`skill`, `register_uri`, identity/credential types) per the [workos/auth.md](https://github.com/workos/auth.md) reference shape |
+| `/auth.md` | [workos.com/auth-md](https://workos.com/auth-md) | Agent registration/authentication instructions with the canonical `# auth.md` H1 and the spec's discover → access → register step structure; customizable via the `bice_mda_auth_md` filter |
 | `/.well-known/mcp/server-card.json` | MCP [SEP-1649](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2127) (draft) | `serverInfo` (name, version), `capabilities`, `transport` (only when a real MCP endpoint is configured) |
 | `/.well-known/agent-skills/index.json` | [Agent Skills Discovery RFC v0.2.0](https://github.com/cloudflare/agent-skills-discovery-rfc) | `$schema`, `skills[]` with `name`, `type`, `description`, `url`, `sha256` |
 | `/.well-known/agent-skills/markdown-for-agents/SKILL.md` | — | A genuine skill teaching agents to read this site as Markdown; its `sha256` in the index always matches the served bytes |

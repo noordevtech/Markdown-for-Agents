@@ -182,23 +182,28 @@ final class Discovery {
 		$site         = rtrim( (string) $config['site_url'], '/' );
 		$register_uri = '' !== (string) $config['register_uri'] ? (string) $config['register_uri'] : $site . '/auth.md';
 
+		$servers = array_values( (array) $config['authorization_servers'] );
+
+		// Shape per the workos/auth.md reference: the outer fields restate the
+		// RFC 9728 PRM, the RFC 8414 fields describe this issuer, and the
+		// agent_auth block is the profile extension. Endpoint fields (token,
+		// revocation, claim) are only meaningful with a real authorization
+		// server behind them, so they are never fabricated here.
 		$metadata = array(
+			'resource'                 => $site,
+			'authorization_servers'    => $servers,
+			'scopes_supported'         => array_values( (array) $config['scopes'] ),
+			'bearer_methods_supported' => array( 'header' ),
 			'issuer'                   => $site,
 			'response_types_supported' => array( 'code' ),
-			'scopes_supported'         => array_values( (array) $config['scopes'] ),
 			'service_documentation'    => $site . '/auth.md',
 			'agent_auth'               => array(
+				'skill'                      => $site . '/auth.md',
 				'register_uri'               => $register_uri,
-				'identity_types_supported'   => array( 'email', 'oauth2_client' ),
+				'identity_types_supported'   => array( 'anonymous', 'email' ),
 				'credential_types_supported' => array( 'oauth2_access_token', 'api_key' ),
 			),
 		);
-
-		$servers = array_values( (array) $config['authorization_servers'] );
-		if ( array() !== $servers ) {
-			// Point at the real issuer(s) able to mint tokens for this resource.
-			$metadata['agent_auth']['authorization_servers'] = $servers;
-		}
 
 		return $metadata;
 	}
@@ -342,8 +347,8 @@ MD . "\n";
 		$auth_section = array() !== $servers
 			? "Tokens for protected resources are issued by:\n\n"
 				. implode( "\n", array_map( static fn( $s ) => '- ' . $s, $servers ) )
-				. "\n\nSee `{$site}/.well-known/oauth-protected-resource` (RFC 9728) for the resource identifier and supported scopes."
-			: "All published content on this site is public and requires **no authentication**. There is currently no OAuth authorization server issuing tokens for this resource; `{$site}/.well-known/oauth-protected-resource` reflects that with an empty `authorization_servers` list.";
+				. "\n\nUse the metadata from Step 1 to obtain an access token, then send it as `Authorization: Bearer <token>`."
+			: "All published content on this site is public and requires **no authentication** — you can skip registration and read everything right now. There is currently no OAuth authorization server issuing tokens for this resource; the Protected Resource Metadata reflects that with an empty `authorization_servers` list.";
 
 		$register_section = '' !== $register
 			? "Register as an agent at: {$register}"
@@ -351,32 +356,37 @@ MD . "\n";
 				. ( '' !== $email ? " at {$email}." : '.' );
 
 		$markdown = <<<MD
-# Agent authentication — {$name}
+# auth.md
 
-> This document follows the auth.md convention (https://workos.com/auth-md)
-> and complements `/.well-known/oauth-protected-resource` (RFC 9728) and
-> `/.well-known/oauth-authorization-server` (RFC 8414 + `agent_auth` block).
+You are an agent reading **{$name}**. This document follows the auth.md
+convention (https://workos.com/auth-md): discover → access → register.
+Follow the steps in order.
 
-## Public access
+## Step 1 — Discover
 
-{$auth_section}
-
-Pages are available as Markdown via content negotiation — send
-`Accept: text/markdown`. See the skill:
-{$site}/.well-known/agent-skills/markdown-for-agents/SKILL.md
-
-## Agent registration
-
-{$register_section}
-
-## Machine-readable metadata
+Fetch the machine-readable metadata for this origin:
 
 | Document | URL |
 |---|---|
-| OAuth protected resource (RFC 9728) | {$site}/.well-known/oauth-protected-resource |
-| OAuth authorization server + agent_auth | {$site}/.well-known/oauth-authorization-server |
+| Protected Resource Metadata (RFC 9728) | {$site}/.well-known/oauth-protected-resource |
+| Authorization Server metadata + `agent_auth` block | {$site}/.well-known/oauth-authorization-server |
 | MCP server card (SEP-1649) | {$site}/.well-known/mcp/server-card.json |
 | Agent skills index | {$site}/.well-known/agent-skills/index.json |
+
+The `agent_auth` block carries `skill` (this document), `register_uri`,
+`identity_types_supported` and `credential_types_supported`.
+
+## Step 2 — Access public content
+
+{$auth_section}
+
+Every page is available as Markdown via content negotiation — send
+`Accept: text/markdown`. Full recipe:
+{$site}/.well-known/agent-skills/markdown-for-agents/SKILL.md
+
+## Step 3 — Register
+
+{$register_section}
 
 ## Content-usage policy
 
